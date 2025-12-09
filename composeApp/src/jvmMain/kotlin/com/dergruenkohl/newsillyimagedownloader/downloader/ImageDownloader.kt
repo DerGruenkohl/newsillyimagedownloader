@@ -12,34 +12,38 @@ import kotlin.io.path.Path
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
-import kotlin.inc
-import kotlin.text.chunked
-import kotlin.text.map
-
+import kotlinx.coroutines.CancellationException
 
 class ImageDownloader(
     val database: DatabaseService,
     val client: HttpClient,
     val tags: List<String>,
-    basePath: String
-)
-{
+    basePath: String,
+    val controller: DownloadController? = null,
+    val concurrency: Int = 8
+) {
     val logger = KotlinLogging.logger {}
     val basePath = Path(basePath)
     var totalDownloaded = 0
     var totalImages = 0
     var errors = 0
+
     suspend fun downloadImages() {
         val femboys = database.getFemboysWithTag(tags)
         totalImages = femboys.size
 
-        femboys.chunked(8).forEach { chunk ->
+        femboys.chunked(concurrency).forEach { chunk ->
+            // check for pause/stop before starting next chunk
+            controller?.checkPausedOrStopped()
             coroutineScope {
                 chunk.map { femboy ->
                     async {
                         try {
+                            controller?.checkPausedOrStopped()
                             logger.info { "Downloading image ${femboy.id}" }
                             downloadImage(femboy)
+                        } catch (e: CancellationException) {
+                            logger.info { "Download cancelled for ${femboy.id}" }
                         } catch (e: Exception) {
                             logger.error(e) { "Error downloading image ${femboy.id}" }
                             errors++
@@ -49,19 +53,24 @@ class ImageDownloader(
             }
         }
     }
+
     suspend fun downloadImage(femboy: Femboy) {
+        controller?.checkPausedOrStopped()
+
         val extension = femboy.fileUrl.substringAfterLast(".")
-        val file = when(femboy.rating){
+        val file = when (femboy.rating) {
             Rating.SFW -> basePath.resolve("sfw/${femboy.id}.$extension").toFile()
             Rating.NSFW -> basePath.resolve("nsfw/${femboy.id}.$extension").toFile()
             Rating.QUESTIONABLE -> basePath.resolve("questionable/${femboy.id}.$extension").toFile()
         }
-        if(file.exists()) {
+        if (file.exists()) {
             logger.info { "Image ${femboy.id} already exists, skipping download" }
             return
         }
+
+        controller?.checkPausedOrStopped()
         val response = client.get(femboy.fileUrl)
-        if(!response.status.isSuccess()){
+        if (!response.status.isSuccess()) {
             logger.warn { "Error downloading $femboy: ${response.status}" }
             errors++
             return
@@ -69,6 +78,6 @@ class ImageDownloader(
         val bytes = response.bodyAsBytes()
         file.writeBytes(bytes)
         totalDownloaded++
-        logger.info { "Downloaded image ${femboy.id} to ${file.path}"}
+        logger.info { "Downloaded image ${femboy.id} to ${file.path}" }
     }
 }

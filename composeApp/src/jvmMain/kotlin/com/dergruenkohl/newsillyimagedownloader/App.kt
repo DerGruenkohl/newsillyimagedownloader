@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dergruenkohl.newsillyimagedownloader.data.DatabaseService
 import com.dergruenkohl.newsillyimagedownloader.downloader.DanboruDownloader
+import com.dergruenkohl.newsillyimagedownloader.downloader.DownloadController
 import com.dergruenkohl.newsillyimagedownloader.downloader.ImageDownloader
 import io.ktor.client.*
 import io.ktor.client.engine.apache5.*
@@ -15,7 +16,7 @@ import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -48,6 +49,10 @@ fun App() {
     var statusMessage by remember { mutableStateOf("Ready") }
     var downloadProgress by remember { mutableStateOf("") }
     var maxPage by remember { mutableStateOf("10") }
+
+    // controller and job refs
+    val controllerState = remember { mutableStateOf<DownloadController?>(null) }
+    val downloadJobState = remember { mutableStateOf<Job?>(null) }
 
     MaterialTheme(
         colorScheme = darkColorScheme()
@@ -124,7 +129,14 @@ fun App() {
 
                     Button(
                         onClick = {
-                            scope.launch {
+                            // start download in dedicated scope/job so we can cancel it
+                            val controller = DownloadController()
+                            controllerState.value = controller
+                            val job = Job()
+                            downloadJobState.value = job
+                            val downloadScope = CoroutineScope(scope.coroutineContext + job)
+
+                            downloadScope.launch {
                                 isDownloadingImages = true
                                 statusMessage = "Downloading images..."
                                 try {
@@ -138,14 +150,20 @@ fun App() {
                                         database = databaseService,
                                         client = client,
                                         tags = tagList,
-                                        basePath = basePath
+                                        basePath = basePath,
+                                        controller = controller,
+                                        concurrency = 8
                                     )
                                     imageDownloader.downloadImages()
                                     statusMessage = "Downloaded ${imageDownloader.totalDownloaded} images with ${imageDownloader.errors} errors"
+                                } catch (e: CancellationException) {
+                                    statusMessage = "Download stopped"
                                 } catch (e: Exception) {
                                     statusMessage = "Error: ${e.message}"
                                 } finally {
                                     isDownloadingImages = false
+                                    controllerState.value = null
+                                    downloadJobState.value = null
                                 }
                             }
                         },
@@ -153,6 +171,35 @@ fun App() {
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("Download Images")
+                    }
+                }
+
+                // Pause / Stop controls
+                if (isDownloadingImages) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val controller = controllerState.value
+                        Button(
+                            onClick = {
+                                controller?.let {
+                                    if (it.isPaused) it.resume() else it.pause()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (controllerState.value?.isPaused == true) "Resume" else "Pause")
+                        }
+                        Button(
+                            onClick = {
+                                controllerState.value?.stop()
+                                downloadJobState.value?.cancel()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Stop")
+                        }
                     }
                 }
 
