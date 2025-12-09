@@ -15,12 +15,11 @@ import kotlin.time.Duration.Companion.seconds
 class DanboruDownloader(
     val client: HttpClient,
     val databaseService: DatabaseService,
-    val tag1: String,
-    val tag2: String? = null
+    val tags: String,
+    val maxPage: Int
 ) {
     private val logger = KotlinLogging.logger {}
-    val danbooruUrl = "https://danbooru.donmai.us/posts.json?tags=astolfo_(fate)&page={page}&limit=200"
-    val maxPage = 35
+    val danbooruUrl = "https://danbooru.donmai.us/posts.json?tags=$tags&page={page}&limit=200"
     @Serializable
     data class DanbooruPost(
         val id: Int,
@@ -50,11 +49,11 @@ class DanboruDownloader(
             try {
                 val url = danbooruUrl.replace("{page}", page.toString())
                 val response: List<DanbooruPost> = client.get(url).body()
-                logger.debug { "Got ${response.size} posts from page $page" }
+                logger.info { "Got ${response.size} posts from page $page" }
                 val femboys = response.mapNotNull { it.toFemboy() }
-                logger.debug { "Converted ${femboys.size} posts to Femboy metadata" }
+                logger.info { "Converted ${femboys.size} posts to Femboy metadata" }
                 databaseService.insertFemboys(femboys)
-                logger.debug { "Appended metadata for ${femboys.size} femboys to database" }
+                logger.info { "Appended metadata for ${femboys.size} femboys to database" }
                 delay(0.3.seconds)
             } catch (e: Exception) {
                 logger.error(e) { "Error while getting posts from page $page" }

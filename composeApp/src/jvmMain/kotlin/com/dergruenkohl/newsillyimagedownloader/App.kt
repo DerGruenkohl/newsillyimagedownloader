@@ -16,6 +16,7 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import java.io.File
 
 @Composable
@@ -25,7 +26,10 @@ fun App() {
     val client = remember {
         HttpClient(Apache5) {
             install(ContentNegotiation) {
-                json()
+                json(Json {
+                    isLenient = true
+                    ignoreUnknownKeys = true
+                })
             }
             install(Logging) {
                 level = LogLevel.INFO
@@ -33,6 +37,7 @@ fun App() {
             install(HttpTimeout) {
                 requestTimeoutMillis = 60000
             }
+            followRedirects = true
         }
     }
 
@@ -42,6 +47,7 @@ fun App() {
     var isDownloadingImages by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("Ready") }
     var downloadProgress by remember { mutableStateOf("") }
+    var maxPage by remember { mutableStateOf("10") }
 
     MaterialTheme(
         colorScheme = darkColorScheme()
@@ -76,6 +82,13 @@ fun App() {
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isDownloadingMetadata && !isDownloadingImages
                 )
+                OutlinedTextField(
+                    value = maxPage,
+                    onValueChange = { maxPage = it },
+                    label = { Text("Max Pages") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isDownloadingMetadata && !isDownloadingImages
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -90,8 +103,10 @@ fun App() {
                                     val downloader = DanboruDownloader(
                                         client = client,
                                         databaseService = databaseService,
-                                        tag1 = tags.split(",").firstOrNull()?.trim() ?: ""
+                                        tags = tags.split(",").joinToString("+"),
+                                        maxPage = maxPage.toIntOrNull() ?: 10
                                     )
+
                                     downloader.getFemboyMetadata()
                                     statusMessage = "Metadata fetched successfully"
                                 } catch (e: Exception) {
