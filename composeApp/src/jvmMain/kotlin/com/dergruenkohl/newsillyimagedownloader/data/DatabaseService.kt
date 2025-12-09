@@ -2,6 +2,7 @@ package com.dergruenkohl.newsillyimagedownloader.data
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.like
 import org.jetbrains.exposed.v1.core.notLike
@@ -13,9 +14,10 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.io.File
+import kotlin.time.measureTime
 
 class DatabaseService {
-
+    private val logger = KotlinLogging.logger {  }
     init {
         // Create data directory if it doesn't exist
         File("data").mkdirs()
@@ -54,9 +56,17 @@ class DatabaseService {
             }
         }
     }
-    fun getFemboysWithTag(tags: List<String>): List<Femboy> = tags.flatMap { tag ->
-        getFemboysWithTag(tag)
-    }.distinctBy { it.id }
+    fun getFemboysWithTag(tags: List<String>): List<Femboy> {
+        logger.info { "Loading images for tags: ${tags.joinToString(",")}" }
+        var femboys = emptyList<Femboy>()
+        val time = measureTime {
+            femboys = tags.flatMap { tag ->
+                getFemboysWithTag(tag)
+            }.distinctBy { it.id }.filter { it.tags.containsAll(tags) }
+        }
+        logger.info { "Loaded ${femboys.size} images in $time" }
+        return femboys
+    }
     fun getFemboysWithTag(tag: String): List<Femboy> {
         return transaction {
             FemboyDao.find {

@@ -181,6 +181,7 @@ fun App() {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         val controller = controllerState.value
+                        val isPaused = controller?.isPaused == true
                         Button(
                             onClick = {
                                 controller?.let {
@@ -189,7 +190,7 @@ fun App() {
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (controllerState.value?.isPaused == true) "Resume" else "Pause")
+                            Text(if (isPaused) "Resume" else "Pause")
                         }
                         Button(
                             onClick = {
@@ -202,6 +203,7 @@ fun App() {
                         }
                     }
                 }
+
 
                 if (isDownloadingMetadata || isDownloadingImages) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

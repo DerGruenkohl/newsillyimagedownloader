@@ -13,6 +13,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ImageDownloader(
     val database: DatabaseService,
@@ -28,7 +31,7 @@ class ImageDownloader(
     var totalImages = 0
     var errors = 0
 
-    suspend fun downloadImages() {
+    suspend fun downloadImages() = withContext(Dispatchers.IO){
         val femboys = database.getFemboysWithTag(tags)
         totalImages = femboys.size
 
