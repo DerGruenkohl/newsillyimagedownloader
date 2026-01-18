@@ -1,10 +1,12 @@
 package com.dergruenkohl.newsillyimagedownloader
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.OutlinedTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.dergruenkohl.newsillyimagedownloader.data.DatabaseService
 import com.dergruenkohl.newsillyimagedownloader.downloader.DanboruDownloader
@@ -42,20 +44,24 @@ fun App() {
         }
     }
 
-    var tags by remember { mutableStateOf("astolfo_(fate)") }
+    var tags by remember { mutableStateOf("umamusume") }
     var basePath by remember { mutableStateOf("./downloads") }
     var isDownloadingMetadata by remember { mutableStateOf(false) }
     var isDownloadingImages by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("Ready") }
     var downloadProgress by remember { mutableStateOf("") }
     var maxPage by remember { mutableStateOf("10") }
+    var splitByName by remember { mutableStateOf(true)}
+    var whiteListedTags by remember { mutableStateOf("umamusume") }
 
     // controller and job refs
     val controllerState = remember { mutableStateOf<DownloadController?>(null) }
     val downloadJobState = remember { mutableStateOf<Job?>(null) }
 
     MaterialTheme(
-        colorScheme = darkColorScheme()
+        colorScheme = darkColorScheme(
+            background = Color(0xFF3B81FF),
+        )
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -77,6 +83,14 @@ fun App() {
                     onValueChange = { tags = it },
                     label = { Text("Tags (comma separated)") },
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = !isDownloadingMetadata && !isDownloadingImages,
+                )
+
+                OutlinedTextField(
+                    value = whiteListedTags,
+                    onValueChange = { whiteListedTags = it },
+                    label = { Text("Whitelisted Tags for split by name (tags are wildcards)") },
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !isDownloadingMetadata && !isDownloadingImages
                 )
 
@@ -93,6 +107,12 @@ fun App() {
                     label = { Text("Max Pages") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isDownloadingMetadata && !isDownloadingImages
+                )
+                Text("Save each image to every name tag")
+                Switch(
+                    checked = splitByName,
+                    onCheckedChange = { splitByName = it },
+                    enabled = !isDownloadingMetadata && !isDownloadingImages,
                 )
 
                 Row(
@@ -146,13 +166,16 @@ fun App() {
                                     File("$basePath/questionable").mkdirs()
 
                                     val tagList = tags.split(",").map { it.trim() }
+                                    val whiteListedTags = whiteListedTags.split(",").map { it.trim() }
                                     val imageDownloader = ImageDownloader(
                                         database = databaseService,
                                         client = client,
                                         tags = tagList,
                                         basePath = basePath,
                                         controller = controller,
-                                        concurrency = 8
+                                        concurrency = 8,
+                                        split = splitByName,
+                                        whiteListedTags = whiteListedTags
                                     )
                                     imageDownloader.downloadImages()
                                     statusMessage = "Downloaded ${imageDownloader.totalDownloaded} images with ${imageDownloader.errors} errors"
