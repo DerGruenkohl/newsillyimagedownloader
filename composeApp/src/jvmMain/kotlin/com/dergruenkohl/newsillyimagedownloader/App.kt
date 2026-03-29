@@ -9,12 +9,14 @@ import androidx.compose.ui.unit.dp
 import com.dergruenkohl.newsillyimagedownloader.ui.TagInputRow
 import com.dergruenkohl.newsillyimagedownloader.data.Providers
 import com.dergruenkohl.newsillyimagedownloader.data.DatabaseService
-import com.dergruenkohl.newsillyimagedownloader.downloader.DanboruDownloader
 import com.dergruenkohl.newsillyimagedownloader.downloader.DownloadController
-import com.dergruenkohl.newsillyimagedownloader.downloader.ImageDownloader
+import com.dergruenkohl.newsillyimagedownloader.ui.DownloadImagesButton
 import com.dergruenkohl.newsillyimagedownloader.ui.DownloadOptions
+import com.dergruenkohl.newsillyimagedownloader.ui.FetchMetadataButton
 import com.dergruenkohl.newsillyimagedownloader.ui.ProviderChange
 import com.dergruenkohl.newsillyimagedownloader.ui.SplitByNameSwitch
+import com.dergruenkohl.newsillyimagedownloader.ui.handlers.handleDownloadImagesClick
+import com.dergruenkohl.newsillyimagedownloader.ui.handlers.handleFetchMetadataClick
 import io.ktor.client.*
 import io.ktor.client.engine.apache5.*
 import io.ktor.client.plugins.*
@@ -23,7 +25,6 @@ import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
-import java.io.File
 
 @Composable
 fun App() {
@@ -113,93 +114,44 @@ fun App() {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
+                    FetchMetadataButton(
                         onClick = {
-                            scope.launch {
-                                if (selectedProvider != Providers.DANBOORU) {
-                                    statusMessage = "$selectedProvider is not implemented yet"
-                                    return@launch
-                                }
-                                isDownloadingMetadata = true
-                                statusMessage = "Fetching metadata..."
-                                try {
-                                    val downloader = DanboruDownloader(
-                                        client = client,
-                                        databaseService = databaseService,
-                                        tags = tags.split(",").joinToString("+"),
-                                        maxPage = maxPage.toIntOrNull() ?: 10
-                                    )
-
-                                    downloader.getFemboyMetadata()
-                                    statusMessage = "Metadata fetched successfully"
-                                } catch (e: Exception) {
-                                    statusMessage = "Error: ${e.message}"
-                                } finally {
-                                    isDownloadingMetadata = false
-                                }
-                            }
+                            handleFetchMetadataClick(
+                                scope = scope,
+                                selectedProvider = selectedProvider,
+                                setIsDownloadingMetadata = { isDownloadingMetadata = it },
+                                setStatusMessage = { statusMessage = it },
+                                client = client,
+                                databaseService = databaseService,
+                                tags = tags,
+                                maxPage = maxPage
+                            )
                         },
                         enabled = !isDownloadingMetadata && !isDownloadingImages,
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Fetch Metadata")
-                    }
+                    )
 
-                    Button(
+                    DownloadImagesButton(
                         onClick = {
-                            if (selectedProvider != Providers.DANBOORU) {
-                                statusMessage = "$selectedProvider is not implemented yet"
-                                return@Button
-                            }
-                            // start download in dedicated scope/job so we can cancel it
-                            val controller = DownloadController()
-                            controllerState.value = controller
-                            val job = Job()
-                            downloadJobState.value = job
-                            val downloadScope = CoroutineScope(scope.coroutineContext + job)
-
-                            downloadScope.launch {
-                                isDownloadingImages = true
-                                statusMessage = "Downloading images..."
-                                try {
-                                    File(basePath).mkdirs()
-                                    File("$basePath/sfw").mkdirs()
-                                    File("$basePath/nsfw").mkdirs()
-                                    File("$basePath/questionable").mkdirs()
-
-                                    val tagList = tags.split(",").map { it.trim() }
-                                    val whiteListedTags = whiteListedTags.split(",").map { it.trim() }
-                                    val imageDownloader = ImageDownloader(
-                                        database = databaseService,
-                                        client = client,
-                                        tags = tagList,
-                                        basePath = basePath,
-                                        controller = controller,
-                                        concurrency = 32,
-                                        split = splitByName,
-                                        whiteListedTags = whiteListedTags,
-                                        onProgressUpdate = { progress ->
-                                            downloadProgress = progress
-                                        }
-                                    )
-                                    imageDownloader.downloadImages()
-                                    statusMessage = "Downloaded ${imageDownloader.totalDownloaded.get()} images with ${imageDownloader.errors.get()} errors"
-                                } catch (e: CancellationException) {
-                                    statusMessage = "Download stopped"
-                                } catch (e: Exception) {
-                                    statusMessage = "Error: ${e.message}"
-                                } finally {
-                                    isDownloadingImages = false
-                                    controllerState.value = null
-                                    downloadJobState.value = null
-                                }
-                            }
+                            handleDownloadImagesClick(
+                                scope = scope,
+                                selectedProvider = selectedProvider,
+                                setStatusMessage = { statusMessage = it },
+                                setIsDownloadingImages = { isDownloadingImages = it },
+                                setDownloadProgress = { downloadProgress = it },
+                                databaseService = databaseService,
+                                client = client,
+                                tags = tags,
+                                whiteListedTagsInput = whiteListedTags,
+                                basePath = basePath,
+                                splitByName = splitByName,
+                                controllerState = controllerState,
+                                downloadJobState = downloadJobState
+                            )
                         },
                         enabled = !isDownloadingMetadata && !isDownloadingImages,
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Download Images")
-                    }
+                    )
                 }
 
                 // Pause / Stop controls
