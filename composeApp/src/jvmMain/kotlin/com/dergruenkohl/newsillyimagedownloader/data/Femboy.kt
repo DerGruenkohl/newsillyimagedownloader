@@ -37,7 +37,7 @@ class FemboyDao(id: EntityID<Int>): IntEntity(id){
     var names by FemboyTable.names
     fun toFemboy(): Femboy {
         return Femboy(
-            id = id.value,
+            id = originalId,
             tags = tags.split(",").map { it.trim() },
             rating = rating,
             fileUrl = fileUrl,

@@ -1,5 +1,6 @@
 package com.dergruenkohl.newsillyimagedownloader.data
 
+import com.sun.org.apache.xalan.internal.lib.ExsltDatetime.time
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -34,6 +35,21 @@ class DatabaseService {
             SchemaUtils.create(FemboyTable)
         }
     }
+    fun cleanUpDatabase() {
+        val time = measureTime {
+            transaction {
+                val femboys = FemboyDao.all().map { it.toFemboy() }
+                logger.info { "Got ${femboys.size} images" }
+                val cleanedFemboys = femboys.distinctBy { it.id }
+                logger.info { "Cleaned up to ${cleanedFemboys.size} images" }
+                SchemaUtils.drop(FemboyTable)
+                SchemaUtils.create(FemboyTable)
+                insertFemboys(cleanedFemboys)
+            }
+        }
+        logger.info { "Cleaned up database in $time" }
+
+    }
 
     fun insertFemboy(femboy: Femboy) {
         transaction {
@@ -64,14 +80,19 @@ class DatabaseService {
                 getFemboysWithTag(tag)
             }.distinctBy { it.id }.filter { it.tags.containsAll(tags) }
         }
+        femboys.sortedBy { it.id }.forEach { femboy ->
+            logger.trace { "Loaded femboy: ${femboy.id} with tags: ${femboy.tags.joinToString(",")}" }
+        }
         logger.info { "Loaded ${femboys.size} images in $time" }
         return femboys
     }
     fun getFemboysWithTag(tag: String): List<Femboy> {
         return transaction {
-            FemboyDao.find {
+            val femboys = FemboyDao.find {
                 FemboyTable.tags like "%$tag%"
             }.map { it.toFemboy() }
+            logger.debug { "Loaded ${femboys.size} images" }
+            femboys
         }
     }
 

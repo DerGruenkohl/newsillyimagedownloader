@@ -6,16 +6,22 @@ import com.dergruenkohl.newsillyimagedownloader.data.Rating
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsBytes
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.copyTo
+import java.nio.channels.Channels
 import kotlin.io.path.Path
-import kotlin.io.path.exists
+import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.Channel
+
 
 class ImageDownloader(
         val database: DatabaseService,
@@ -23,102 +29,173 @@ class ImageDownloader(
         val tags: List<String>,
         basePath: String,
         val controller: DownloadController? = null,
-        val concurrency: Int = 8,
+        val concurrency: Int = 16,
         val split: Boolean,
         val whiteListedTags: List<String>,
+        val onProgressUpdate: (String) -> Unit
 ) {
     val logger = KotlinLogging.logger {}
     val basePath = Path(basePath)
-    var totalDownloaded = 0
+    val totalDownloaded = AtomicInteger(0)
+    val totalProcessed = AtomicInteger(0)
     var totalImages = 0
-    var errors = 0
+    val errors = AtomicInteger(0)
+    val totalFilesCreated = AtomicInteger(0)
+
 
     suspend fun downloadImages() =
-            withContext(Dispatchers.IO) {
-                val femboys = database.getFemboysWithTag(tags)
-                totalImages = femboys.size
+        withContext(Dispatchers.IO.limitedParallelism(256)) {
+            database.cleanUpDatabase()
 
-                femboys.chunked(concurrency).forEach { chunk ->
-                    // check for pause/stop before starting next chunk
-                    controller?.checkPausedOrStopped()
-                    coroutineScope {
-                        chunk
-                                .map { femboy ->
-                                    async {
-                                        try {
-                                            controller?.checkPausedOrStopped()
-                                            logger.info { "Downloading image ${femboy.id}" }
-                                            downloadImage(femboy)
-                                        } catch (e: CancellationException) {
-                                            logger.info { "Download cancelled for ${femboy.id}" }
-                                        } catch (e: Exception) {
-                                            logger.error(e) {
-                                                "Error downloading image ${femboy.id}"
-                                            }
-                                            errors++
-                                        }
-                                    }
-                                }
-                                .awaitAll()
+            val femboys = database.getFemboysWithTag(tags)
+            totalImages = femboys.size
+
+            coroutineScope {
+                // Create concurrent worker coroutines
+                val channel = Channel<Femboy>(capacity = concurrency * 2)
+
+                // Launch worker coroutines
+                val workers = List(concurrency) {
+                    async {
+                        for (femboy in channel) {
+                            try {
+                                controller?.checkPausedOrStopped()
+                                logger.info { "Downloading image ${femboy.id}" }
+                                downloadImage(femboy)
+                            } catch (e: CancellationException) {
+                                logger.info { "Download cancelled for ${femboy.id}" }
+                                throw e
+                            } catch (e: Exception) {
+                                logger.error(e) { "Error downloading image ${femboy.id}" }
+                                errors.incrementAndGet()
+                            }
+                        }
                     }
                 }
-            }
 
-    suspend fun downloadImage(femboy: Femboy) {
+                // Producer: feed femboys to workers
+                val producer = async {
+                    try {
+                        for (femboy in femboys) {
+                            controller?.checkPausedOrStopped()
+
+                            // Update progress
+                            val progressText = """
+                            Processed: ${totalProcessed.get()} / $totalImages
+                            Downloaded: ${totalDownloaded.get()}
+                            Skipped: ${totalProcessed.get() - totalDownloaded.get() - errors.get()}
+                            FilesCreated: ${totalFilesCreated.get()}
+                            Progress: ${"%.2f".format(totalProcessed.get().toDouble() / totalImages.toDouble() * 100)} %
+                            Errors: ${errors.get()}
+                        """.trimIndent()
+                            withContext(Dispatchers.Main) { onProgressUpdate(progressText) }
+
+                            channel.send(femboy)
+                        }
+                    } finally {
+                        channel.close()
+                    }
+                }
+
+                // Wait for completion
+                producer.await()
+                workers.awaitAll()
+            }
+            // Final progress update
+            val progressText = """
+            Processed: ${totalProcessed.get()} / $totalImages
+            Downloaded: ${totalDownloaded.get()}
+            Skipped: ${totalProcessed.get() - totalDownloaded.get() - errors.get()}
+            Progress: 100.00 %
+            Errors: ${errors.get()}
+        """.trimIndent()
+            withContext(Dispatchers.Main) { onProgressUpdate(progressText) }
+        }
+
+
+    suspend fun downloadImage(image: Femboy) {
         controller?.checkPausedOrStopped()
 
-        val extension = femboy.fileUrl.substringAfterLast(".")
-        val paths =
+        val extension = image.fileUrl.substringAfterLast(".")
+
+        // The canonical file in the base rating folder
+        val file =
+                when (image.rating) {
+                    Rating.SFW -> basePath.resolve("sfw/${image.id}.$extension").toFile()
+                    Rating.NSFW -> basePath.resolve("nsfw/${image.id}.$extension").toFile()
+                    Rating.QUESTIONABLE ->
+                            basePath.resolve("questionable/${image.id}.$extension").toFile()
+                }
+
+        totalProcessed.incrementAndGet()
+
+        // Tag-specific link targets (only relevant when split is enabled)
+        val linkTargets =
                 if (split) {
-                    femboy.names
+                    image.names
                         .filter { name ->
-                            if (whiteListedTags.isEmpty()){
-                                return@filter true
-                            }
+                            if (whiteListedTags.isEmpty()) return@filter true
                             whiteListedTags.any { wl -> name.contains(wl, ignoreCase = true) }
                         }
-                        .map { basePath.resolve(it.replace("/", "_")) }
-                } else {
-                    listOf(basePath)
-                }
-
-        val files =
-                paths
-                        .map {
-                            it.resolve("${femboy.rating.name.lowercase()}/${femboy.id}.$extension")
-                                    .toFile()
+                        .map { name ->
+                            basePath
+                                .resolve(name.replace("/", "_"))
+                                .resolve("${image.rating.name.lowercase()}/${image.id}.$extension")
+                                .toFile()
                         }
                         .filter { !it.exists() }
-        val file =
-                when (femboy.rating) {
-                    Rating.SFW -> basePath.resolve("sfw/${femboy.id}.$extension").toFile()
-                    Rating.NSFW -> basePath.resolve("nsfw/${femboy.id}.$extension").toFile()
-                    Rating.QUESTIONABLE ->
-                            basePath.resolve("questionable/${femboy.id}.$extension").toFile()
+                } else {
+                    emptyList()
                 }
+
         if (file.exists()) {
-            logger.info { "Image ${femboy.id} already exists, skipping download" }
+            logger.info { "Image ${image.id} already exists, skipping" }
             return
         }
-        if (files.isEmpty()) {
-            logger.info { "No images to download for ${femboy.id}, skipping download " }
+
+        if (!split && file.exists()) {
+            logger.info { "Image ${image.id} already exists, skipping download" }
             return
         }
 
         controller?.checkPausedOrStopped()
-        val response = client.get(femboy.fileUrl)
+        val response = client.get(image.fileUrl)
         if (!response.status.isSuccess()) {
-            logger.warn { "Error downloading $femboy: ${response.status}" }
-            errors++
+            logger.warn { "Error downloading $image: ${response.status}" }
+            errors.incrementAndGet()
             return
         }
-        val bytes = response.bodyAsBytes()
-        files.forEach {
-            it.parentFile.mkdirs()
-            it.writeBytes(bytes)
-            logger.info { "Downloaded image ${femboy.id} to ${it.path}" }
+        // Stream directly to disk — no full-image ByteArray held in memory
+        file.parentFile.mkdirs()
+        file.outputStream().use { fos ->
+            val body: ByteReadChannel = response.bodyAsChannel()
+            body.copyTo(Channels.newChannel(fos))
         }
-        // file.writeBytes(bytes)
-        totalDownloaded++
+        logger.info { "Downloaded image ${image.id} to ${file.path}" }
+        totalFilesCreated.incrementAndGet()
+        totalDownloaded.incrementAndGet()
+
+        // Create hard links (or symlinks as fallback) in tag-specific folders
+        linkTargets.forEach { link ->
+            createLink(link, file)
+        }
+    }
+
+    private fun createLink(link: java.io.File, target: java.io.File) {
+        try {
+            link.parentFile.mkdirs()
+            Files.createLink(link.toPath(), target.toPath())
+            logger.info { "Hard-linked ${target.path} -> ${link.path}" }
+            totalFilesCreated.incrementAndGet()
+        } catch (_: Exception) {
+            // Fall back to symbolic link (e.g. cross-device or unsupported FS)
+            try {
+                Files.createSymbolicLink(link.toPath(), target.toPath())
+                logger.info { "Symlinked ${target.path} -> ${link.path}" }
+                totalFilesCreated.incrementAndGet()
+            } catch (se: Exception) {
+                logger.error(se) { "Failed to create link for ${link.path}" }
+            }
+        }
     }
 }

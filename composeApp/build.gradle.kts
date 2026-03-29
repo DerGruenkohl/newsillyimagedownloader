@@ -50,6 +50,14 @@ compose.desktop {
     application {
         mainClass = "com.dergruenkohl.newsillyimagedownloader.MainKt"
 
+        jvmArgs(
+            "-Xms256m",
+            "-Xmx16g",
+            "-XX:+UseG1GC",
+            "-XX:MaxGCPauseMillis=50",
+            "-XX:+UseStringDeduplication"
+        )
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "com.dergruenkohl.newsillyimagedownloader"

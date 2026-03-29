@@ -1,17 +1,20 @@
 package com.dergruenkohl.newsillyimagedownloader
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.OutlinedTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.dergruenkohl.newsillyimagedownloader.ui.TagInputRow
+import com.dergruenkohl.newsillyimagedownloader.data.Providers
 import com.dergruenkohl.newsillyimagedownloader.data.DatabaseService
 import com.dergruenkohl.newsillyimagedownloader.downloader.DanboruDownloader
 import com.dergruenkohl.newsillyimagedownloader.downloader.DownloadController
 import com.dergruenkohl.newsillyimagedownloader.downloader.ImageDownloader
+import com.dergruenkohl.newsillyimagedownloader.ui.DownloadOptions
+import com.dergruenkohl.newsillyimagedownloader.ui.ProviderChange
+import com.dergruenkohl.newsillyimagedownloader.ui.SplitByNameSwitch
 import io.ktor.client.*
 import io.ktor.client.engine.apache5.*
 import io.ktor.client.plugins.*
@@ -53,6 +56,7 @@ fun App() {
     var maxPage by remember { mutableStateOf("10") }
     var splitByName by remember { mutableStateOf(true)}
     var whiteListedTags by remember { mutableStateOf("umamusume") }
+    var selectedProvider by remember { mutableStateOf(Providers.DANBOORU) }
 
     // controller and job refs
     val controllerState = remember { mutableStateOf<DownloadController?>(null) }
@@ -67,6 +71,7 @@ fun App() {
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -78,42 +83,31 @@ fun App() {
                     style = MaterialTheme.typography.headlineMedium
                 )
 
-                OutlinedTextField(
-                    value = tags,
-                    onValueChange = { tags = it },
-                    label = { Text("Tags (comma separated)") },
-                    modifier = Modifier.fillMaxWidth(),
+                TagInputRow(
+                    tags = tags,
+                    onTagsChange = { tags = it },
+                    whiteListedTags = whiteListedTags,
+                    onWhiteListedTagsChange = { whiteListedTags = it },
+                    enabled = !isDownloadingMetadata && !isDownloadingImages
+                )
+                DownloadOptions(
+                    basePath = basePath,
+                    basePathChange = { basePath = it },
                     enabled = !isDownloadingMetadata && !isDownloadingImages,
+                    maxPage = maxPage,
+                    maxPageChange = { maxPage = it }
                 )
-
-                OutlinedTextField(
-                    value = whiteListedTags,
-                    onValueChange = { whiteListedTags = it },
-                    label = { Text("Whitelisted Tags for split by name (tags are wildcards)") },
-                    modifier = Modifier.fillMaxWidth(),
+                ProviderChange(
+                    selectedProvider = selectedProvider,
+                    onProviderChange = { selectedProvider = it },
                     enabled = !isDownloadingMetadata && !isDownloadingImages
                 )
-
-                OutlinedTextField(
-                    value = basePath,
-                    onValueChange = { basePath = it },
-                    label = { Text("Download Path") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !isDownloadingMetadata && !isDownloadingImages
-                )
-                OutlinedTextField(
-                    value = maxPage,
-                    onValueChange = { maxPage = it },
-                    label = { Text("Max Pages") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !isDownloadingMetadata && !isDownloadingImages
-                )
-                Text("Save each image to every name tag")
-                Switch(
+                SplitByNameSwitch(
                     checked = splitByName,
                     onCheckedChange = { splitByName = it },
-                    enabled = !isDownloadingMetadata && !isDownloadingImages,
+                    enabled = !isDownloadingMetadata && !isDownloadingImages
                 )
+
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -122,6 +116,10 @@ fun App() {
                     Button(
                         onClick = {
                             scope.launch {
+                                if (selectedProvider != Providers.DANBOORU) {
+                                    statusMessage = "$selectedProvider is not implemented yet"
+                                    return@launch
+                                }
                                 isDownloadingMetadata = true
                                 statusMessage = "Fetching metadata..."
                                 try {
@@ -149,6 +147,10 @@ fun App() {
 
                     Button(
                         onClick = {
+                            if (selectedProvider != Providers.DANBOORU) {
+                                statusMessage = "$selectedProvider is not implemented yet"
+                                return@Button
+                            }
                             // start download in dedicated scope/job so we can cancel it
                             val controller = DownloadController()
                             controllerState.value = controller
@@ -173,12 +175,15 @@ fun App() {
                                         tags = tagList,
                                         basePath = basePath,
                                         controller = controller,
-                                        concurrency = 8,
+                                        concurrency = 32,
                                         split = splitByName,
-                                        whiteListedTags = whiteListedTags
+                                        whiteListedTags = whiteListedTags,
+                                        onProgressUpdate = { progress ->
+                                            downloadProgress = progress
+                                        }
                                     )
                                     imageDownloader.downloadImages()
-                                    statusMessage = "Downloaded ${imageDownloader.totalDownloaded} images with ${imageDownloader.errors} errors"
+                                    statusMessage = "Downloaded ${imageDownloader.totalDownloaded.get()} images with ${imageDownloader.errors.get()} errors"
                                 } catch (e: CancellationException) {
                                     statusMessage = "Download stopped"
                                 } catch (e: Exception) {
@@ -233,7 +238,11 @@ fun App() {
                 }
 
                 Card(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp)

@@ -22,7 +22,7 @@ class DownloadController {
     suspend fun checkPausedOrStopped() {
         while (_paused.get()) {
             if (_stopped.get()) throw CancellationException("Download stopped")
-            delay(200)
+            //delay(200)
         }
         if (_stopped.get()) throw CancellationException("Download stopped")
     }
