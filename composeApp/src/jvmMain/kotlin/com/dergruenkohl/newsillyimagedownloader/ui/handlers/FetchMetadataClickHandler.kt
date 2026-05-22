@@ -3,6 +3,7 @@ package com.dergruenkohl.newsillyimagedownloader.ui.handlers
 import com.dergruenkohl.newsillyimagedownloader.data.DatabaseService
 import com.dergruenkohl.newsillyimagedownloader.data.Providers
 import com.dergruenkohl.newsillyimagedownloader.downloader.DanboruDownloader
+import com.dergruenkohl.newsillyimagedownloader.downloader.R34Downloader
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -18,21 +19,30 @@ fun handleFetchMetadataClick(
     maxPage: String,
 ) {
     scope.launch {
-        if (selectedProvider != Providers.DANBOORU) {
-            setStatusMessage("$selectedProvider is not implemented yet")
-            return@launch
-        }
-
         setIsDownloadingMetadata(true)
         setStatusMessage("Fetching metadata...")
         try {
-            val downloader = DanboruDownloader(
-                client = client,
-                databaseService = databaseService,
-                tags = tags.split(",").joinToString("+"),
-                maxPage = maxPage.toIntOrNull() ?: 10
-            )
-            downloader.getFemboyMetadata()
+            val downloader = when (selectedProvider){
+                Providers.DANBOORU -> {
+                    DanboruDownloader(
+                        client = client,
+                        databaseService = databaseService,
+                        tags = tags.split(",").joinToString("+"),
+                        maxPage = maxPage.toIntOrNull() ?: 10
+                    )
+                }
+                Providers.R34 -> {
+                    R34Downloader(
+                        client = client,
+                        databaseService = databaseService,
+                        tags = tags.split(",").joinToString("+"),
+                        maxPage = maxPage.toIntOrNull() ?: 10
+                    )
+
+                }
+            }
+            setStatusMessage("Fetching metadata using ${selectedProvider.name.lowercase()}")
+            downloader.fetchMetadata()
             setStatusMessage("Metadata fetched successfully")
         } catch (e: Exception) {
             setStatusMessage("Error: ${e.message}")

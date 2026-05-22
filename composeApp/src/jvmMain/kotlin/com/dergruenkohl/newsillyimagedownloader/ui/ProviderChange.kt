@@ -43,7 +43,7 @@ fun ProviderChange(
 					style = MaterialTheme.typography.bodyLarge
 				)
 				Text(
-					text = "Select where metadata and images are sourced from.",
+					text = "Select where metadata is sourced from.",
 					style = MaterialTheme.typography.bodySmall,
 					color = MaterialTheme.colorScheme.onSurfaceVariant
 				)

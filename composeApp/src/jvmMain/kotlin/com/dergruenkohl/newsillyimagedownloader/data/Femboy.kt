@@ -7,7 +7,7 @@ import org.jetbrains.exposed.v1.dao.IntEntityClass
 
 @Serializable
 data class Femboy(
-    val id: Int,
+    val id: Long,
     val tags: List<String>,
     val rating: Rating,
     val fileUrl: String,

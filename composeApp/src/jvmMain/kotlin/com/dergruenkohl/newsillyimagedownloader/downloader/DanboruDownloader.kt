@@ -12,22 +12,21 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Duration.Companion.seconds
 
 class DanboruDownloader(
-    val client: HttpClient,
-    val databaseService: DatabaseService,
-    val tags: String,
-    val maxPage: Int
-) {
+    override val client: HttpClient,
+    override val databaseService: DatabaseService,
+    override val tags: String,
+    override val maxPage: Int
+): MetadataDownloader {
     private val logger = KotlinLogging.logger {}
     val danbooruUrl = "https://danbooru.donmai.us/posts.json?tags=$tags&page={page}&limit=200"
     @Serializable
     data class DanbooruPost(
-        val id: Int,
+        val id: Long,
         @SerialName("tag_string")
         val tags: String,
         val rating: String,
@@ -49,7 +48,7 @@ class DanboruDownloader(
             )
         }
     }
-     suspend fun getFemboyMetadata() {
+     override suspend fun fetchMetadata() {
          coroutineScope {
              val channel = Channel<String>(capacity = 16)
              val workers = List(8) {

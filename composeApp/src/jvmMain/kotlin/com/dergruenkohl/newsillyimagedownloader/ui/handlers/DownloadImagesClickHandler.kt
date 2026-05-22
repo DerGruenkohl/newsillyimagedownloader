@@ -27,11 +27,6 @@ fun handleDownloadImagesClick(
     controllerState: MutableState<DownloadController?>,
     downloadJobState: MutableState<Job?>,
 ) {
-    if (selectedProvider != Providers.DANBOORU) {
-        setStatusMessage("$selectedProvider is not implemented yet")
-        return
-    }
-
     val controller = DownloadController()
     controllerState.value = controller
 

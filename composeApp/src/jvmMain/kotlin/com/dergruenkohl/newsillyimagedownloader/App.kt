@@ -6,15 +6,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.dergruenkohl.newsillyimagedownloader.ui.TagInputRow
-import com.dergruenkohl.newsillyimagedownloader.data.Providers
 import com.dergruenkohl.newsillyimagedownloader.data.DatabaseService
+import com.dergruenkohl.newsillyimagedownloader.data.Providers
 import com.dergruenkohl.newsillyimagedownloader.downloader.DownloadController
-import com.dergruenkohl.newsillyimagedownloader.ui.DownloadImagesButton
-import com.dergruenkohl.newsillyimagedownloader.ui.DownloadOptions
-import com.dergruenkohl.newsillyimagedownloader.ui.FetchMetadataButton
-import com.dergruenkohl.newsillyimagedownloader.ui.ProviderChange
-import com.dergruenkohl.newsillyimagedownloader.ui.SplitByNameSwitch
+import com.dergruenkohl.newsillyimagedownloader.ui.*
 import com.dergruenkohl.newsillyimagedownloader.ui.handlers.handleDownloadImagesClick
 import com.dergruenkohl.newsillyimagedownloader.ui.handlers.handleFetchMetadataClick
 import io.ktor.client.*
@@ -23,7 +18,7 @@ import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Job
 import kotlinx.serialization.json.Json
 
 @Composable
@@ -39,10 +34,16 @@ fun App() {
                 })
             }
             install(Logging) {
-                level = LogLevel.INFO
+                level = LogLevel.HEADERS
             }
             install(HttpTimeout) {
                 requestTimeoutMillis = 60000
+            }
+            expectSuccess = true
+            install(HttpRequestRetry) {
+                retryOnServerErrors(maxRetries = 5)
+                retryOnException(maxRetries = 5)
+                exponentialDelay()
             }
             followRedirects = true
         }
@@ -55,8 +56,8 @@ fun App() {
     var statusMessage by remember { mutableStateOf("Ready") }
     var downloadProgress by remember { mutableStateOf("") }
     var maxPage by remember { mutableStateOf("10") }
-    var splitByName by remember { mutableStateOf(true)}
-    var whiteListedTags by remember { mutableStateOf("umamusume") }
+    var splitByName by remember { mutableStateOf(true) }
+    var whiteListedTags by remember { mutableStateOf("umamusume,hayakawa_tazuna,anshinzawa_sasami,kashimoto_riko,kiryuin_aoi") }
     var selectedProvider by remember { mutableStateOf(Providers.DANBOORU) }
 
     // controller and job refs

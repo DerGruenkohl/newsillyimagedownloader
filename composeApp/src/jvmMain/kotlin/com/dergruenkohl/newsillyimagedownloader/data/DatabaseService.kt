@@ -15,6 +15,7 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.io.File
+import kotlin.text.contains
 import kotlin.time.measureTime
 
 class DatabaseService {
@@ -71,21 +72,39 @@ class DatabaseService {
                 this[FemboyTable.names] = femboy.names.joinToString(";")
             }
         }
+        logger.info { "Inserted ${femboys.size} images" }
     }
     fun getFemboysWithTag(tags: List<String>): List<Femboy> {
-        logger.info { "Loading images for tags: ${tags.joinToString(",")}" }
+        val rawTags = tags.map { it.trim() }.filter { it.isNotEmpty() }
+        val includeTags = rawTags.filterNot { it.startsWith("-") }
+        val excludeTags = rawTags
+            .filter { it.startsWith("-") }
+            .map { it.removePrefix("-").trim() }
+            .filter { it.isNotEmpty() }
+
+        logger.info {
+            "Loading images for include=[${includeTags.joinToString(",")}], exclude=[${excludeTags.joinToString(",")}]"
+        }
+
         var femboys = emptyList<Femboy>()
         val time = measureTime {
-            femboys = tags.flatMap { tag ->
-                getFemboysWithTag(tag)
-            }.distinctBy { it.id }.filter { it.tags.containsAll(tags) }
+            val candidates = if (includeTags.isEmpty()) {
+                // If only negative tags are provided, start from all and then exclude.
+                getAllFemboys()
+            } else {
+                includeTags.flatMap { tag -> getFemboysWithTag(tag) }.distinctBy { it.id }
+            }
+
+            femboys = candidates.filter { femboy ->
+                val postTags = femboy.tags.map { it.trim() }.toSet()
+                includeTags.all { it in postTags } && excludeTags.none { it in postTags }
+            }
         }
-        femboys.sortedBy { it.id }.forEach { femboy ->
-            logger.trace { "Loaded femboy: ${femboy.id} with tags: ${femboy.tags.joinToString(",")}" }
-        }
+
         logger.info { "Loaded ${femboys.size} images in $time" }
         return femboys
     }
+
     fun getFemboysWithTag(tag: String): List<Femboy> {
         return transaction {
             val femboys = FemboyDao.find {
