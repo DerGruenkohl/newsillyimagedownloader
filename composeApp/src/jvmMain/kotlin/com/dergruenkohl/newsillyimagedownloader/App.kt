@@ -27,6 +27,9 @@ fun App() {
     val databaseService = remember { DatabaseService() }
     val client = remember {
         HttpClient(Apache5) {
+            install(UserAgent) {
+                agent = "Silly goober"
+            }
             install(ContentNegotiation) {
                 json(Json {
                     isLenient = true

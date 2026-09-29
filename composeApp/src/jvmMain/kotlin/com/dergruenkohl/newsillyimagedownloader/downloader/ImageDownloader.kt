@@ -5,8 +5,10 @@ import com.dergruenkohl.newsillyimagedownloader.data.Femboy
 import com.dergruenkohl.newsillyimagedownloader.data.Rating
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
+import io.ktor.client.request.basicAuth
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.headers
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.copyTo
@@ -25,6 +27,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -37,7 +41,7 @@ class ImageDownloader(
         val tags: List<String>,
         basePath: String,
         val controller: DownloadController? = null,
-        val concurrency: Int = 4,
+        val concurrency: Int = 16,
         val split: Boolean,
         val whiteListedTags: List<String>,
         val onProgressUpdate: (String) -> Unit
@@ -50,6 +54,24 @@ class ImageDownloader(
     val errors = AtomicInteger(0)
     val totalFilesCreated = AtomicInteger(0)
     var recursions = 0
+
+    private val rateLimitMutex = Mutex()
+    private var nextRequestTime = 0L
+    private val REQUEST_INTERVAL_MS = 300L // 200 requests/minute
+
+    private suspend fun acquireRateLimit() {
+        rateLimitMutex.withLock {
+            val now = System.currentTimeMillis()
+
+            if (now < nextRequestTime) {
+                val delay = (nextRequestTime - now).milliseconds
+                logger.info { "Rate limiting for $delay" }
+                delay(delay)
+            }
+
+            nextRequestTime = maxOf(System.currentTimeMillis(), nextRequestTime) + REQUEST_INTERVAL_MS
+        }
+    }
 
 
     suspend fun downloadImages() {
@@ -172,7 +194,14 @@ class ImageDownloader(
         }
 
         controller?.checkPausedOrStopped()
-        val response = client.get(image.fileUrl)
+
+        acquireRateLimit()
+
+        val response = client.get(image.fileUrl){
+            headers {
+                basicAuth("DerGruenkohl", "hcF4NWqA34xTN2JG6TaNkhbC")
+            }
+        }
         if (!response.status.isSuccess()) {
             logger.warn { "Error downloading $image: ${response.status}" }
             errors.incrementAndGet()
